@@ -1,72 +1,83 @@
 #!/usr/bin/env python3
 
 import socket
-import pickle
 import os
 
-from datetime import datetime as dt
+from util import cria_mensagem
 from threading import Thread
 
-connected_users = list()
-
-MULTICAST_GROUP = str(os.environ['MULTICAST_GROUP'])
-MULTICAST_PORT = int(os.environ['MULTICAST_PORT'])
+CONNECTED_USERS = dict()
 
 SERVER_IP = str(os.environ['SERVER_IP'])
 SERVER_PORT = int(os.environ['SERVER_PORT'])
 
-SOCKET_MSG = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-SOCKET_MSG.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-SOCKET_MSG.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+def broadcast(mensagem: str, client: socket.socket) -> None:
+    c: socket.socket
+
+    for user, c in CONNECTED_USERS.items():
+        if c != client:
+            try:
+                c.send(mensagem)
+            except:
+                c.close()
+                remover_cliente(user)
+
+def remover_cliente(user: str) -> None:
+    global CONNECTED_USERS
+
+    if user in CONNECTED_USERS:
+        CONNECTED_USERS.pop(user)
+
 
 def tratar_cliente(client: socket.socket, addr: tuple) -> None:
-    global connected_users
+    global CONNECTED_USERS
     
     print('Client', addr, 'connected')
 
     client.send("Digite seu usuário: ".encode())
     username = client.recv(256).decode('utf8').replace('\n', '')
 
-    if username in connected_users:
+    if username in CONNECTED_USERS:
         client.send("Usuário já registrado".encode())
         client.close()
         exit(1)
     else:
         client.send("OK\x01".encode())
 
-    connected_users.append(username)
+    CONNECTED_USERS[username] = client
 
     print('Client', addr, 'registered as', username)
 
-    client.send(str(len(connected_users)).encode())
+    client.send(str(len(CONNECTED_USERS)).encode())
 
     while True:
-        msg = client.recv(2048)
+        msg = client.recv(2048).decode('utf8')
 
-        if msg.decode() == "exit\x01":
-            print('Usuário', username, 'saiu do chat')
-            connected_users.remove(username)
+        if msg == "exit\x01" or not msg:
+            msg = f"Usuário {username} saiu do chat"
+            msg = cria_mensagem("Servidor", msg)
+            print(msg.decode())
+            broadcast(msg, client)
+            remover_cliente(username)
             break
-
-        data = f"[ {username} ({dt.now()}) ]: {msg.decode()}"
         
-        print(data)
+        msg = cria_mensagem(username, msg)
+        print(msg.decode())
 
-        pkt = {'sender': username, 'data': data}
+        broadcast(msg, client)
 
-        SOCKET_MSG.sendto(pickle.dumps(pkt), (MULTICAST_GROUP, MULTICAST_PORT))
+if __name__ == '__main__':
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sockfd:
+        sockfd.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sockfd.bind((SERVER_IP, SERVER_PORT))
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sockfd:
-    sockfd.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sockfd.bind((SERVER_IP, SERVER_PORT))
+        sockfd.listen()
 
-    sockfd.listen()
+        while True:
+            print('Esperando clientes')
 
-    while True:
-        print('Esperando clientes')
+            client, addr = sockfd.accept()
 
-        client, addr = sockfd.accept()
-
-        Thread(target=tratar_cliente, args=(client, addr)).start()
+            Thread(target=tratar_cliente, args=(client, addr)).start()
 
         
