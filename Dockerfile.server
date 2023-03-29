@@ -3,5 +3,6 @@ FROM python:3.10-slim
 WORKDIR /app
 
 ADD server.py .
+ADD util.py .
 
 ENTRYPOINT ["python", "server.py"]

@@ -1,93 +1,75 @@
 #!/usr/bin/env python3
 
 import socket
-import pickle
 import os
-import struct
+import select
+import sys
 
+from util import cria_mensagem
 from screen import Screen
-from threading import Thread
 
 USERNAME = ""
-
-MULTICAST_GROUP = str(os.environ['MULTICAST_GROUP'])
-MULTICAST_PORT = int(os.environ['MULTICAST_PORT'])
 
 SERVER_IP = str(os.environ['SERVER_IP'])
 SERVER_PORT = int(os.environ['SERVER_PORT'])
 
 AUTHENTICATE = str(os.environ['AUTHENTICATE'])
 
-def tratar_msg_recebida(addr: tuple, s: Screen):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sockfd:
-        sockfd.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sockfd.bind(addr)
-        mreq = struct.pack("4sl", socket.inet_aton(addr[0]), socket.INADDR_ANY)
-
-        sockfd.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-
-        while True:
-            data, _ = sockfd.recvfrom(1024)
-
-            if not data:
-                break
-
-            data = pickle.loads(data)
-
-            s.set_text(data['data'])
-
 def autenticar(server: socket.socket, screen: Screen) -> bool:
     global USERNAME
-    msg = server.recv(256).decode()
-    screen.set_text(msg)
-    uname = s.get_text()
-    s._n_lines -= 1
-    s.set_text(uname, col=len(msg))
-    server.send(uname[:-1].encode('utf8'))
+    
 
     USERNAME = uname
-
-    if AUTHENTICATE == "yes":
-        msg = server.recv(256).decode()
-        s.set_text(msg)
-
-        passwd = s.get_text()
-        s._n_lines -= 1
-        server.send(passwd[:-1].encode('utf8')) 
-    
+   
     confirm = server.recv(32).decode()
 
     if confirm != "OK\x01":
-        s.set_text("Senha usuário ou senha inválidos")
+        screen.set_text(confirm)
         return False
 
     return True
 
 
 if __name__ == '__main__':
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sockfd:
-        sockfd.connect((SERVER_IP, SERVER_PORT))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as fd:
+        fd.connect((SERVER_IP, SERVER_PORT))
         
-        with Screen() as s:
-            t = Thread(target=tratar_msg_recebida, args=((MULTICAST_GROUP, MULTICAST_PORT), s))
-            t.daemon = True
-            t.start()
+        with Screen() as scr:
+            msg = fd.recv(256).decode()
+            scr.set_text(msg)
+            uname = scr.get_text()
+            scr._n_lines -= 1
+            scr.set_text(uname, col=len(msg))
+            fd.send(uname[:-1].encode('utf8'))
 
-            is_authenticated = autenticar(sockfd, s)
+            confirm = fd.recv(16).decode()
 
-            if not is_authenticated:
-                sockfd.send("exit\x01".encode('utf8'))
-                s.clear()
-                exit(1)
+            if confirm != "OK\x01":
+                fd.send("exit\x01".encode('utf8'))
+                # scr.clear()
+                # exit(1)
 
-            users_online = sockfd.recv(1).decode()
-            s.set_text(f'Users connected: {users_online}')
+            users_online = fd.recv(2).decode()
+            scr.set_text(f'Users connected: {users_online}')
 
             while True:
+                socket_list = [sys.stdin, fd]
+
+                sockets, _, _ = select.select(socket_list, [], [])
+
                 try:
-                    msg = s.get_text()
-                    sockfd.send(msg.encode('utf8'))
+                    for s in sockets:
+                        if s == fd:
+                            msg = s.recv(2048)
+                            scr.set_text(msg.decode())
+                            continue
+                        else:
+                            msg = scr.get_text()
+
+                            fd.send(msg.encode())
+
+                            msg = cria_mensagem("Você", msg, net=False)
+                            scr.set_text(msg)
                 except KeyboardInterrupt:
-                    sockfd.send("exit\x01".encode('utf8'))
-                    s.clear()
+                    fd.send("exit\x01".encode('utf8'))
                     break
