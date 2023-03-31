@@ -1,9 +1,9 @@
 build:
-	docker build -t vpemfh7/data-hiding:client -f Dockerfile.client . 
-	docker build -t vpemfh7/data-hiding:server -f Dockerfile.server .
+	docker build -t hrchlhck/data-hiding:client -f Dockerfile.client . 
+	docker build -t hrchlhck/data-hiding:server -f Dockerfile.server .
 
-run_server:
-	docker run -it -p 8888:8888/tcp --rm --env-file=.env vpemfh7/data-hiding:server
+server:
+	docker run -it -p 8888:8888/tcp --rm --env-file=.env hrchlhck/data-hiding:server
 
-run_client:
-	docker run -it --env-file=.env vpemfh7/data-hiding:client
+client:
+	docker run -it --env-file=.env hrchlhck/data-hiding:client
